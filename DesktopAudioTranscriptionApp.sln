@@ -15,6 +15,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".github", ".github", "{DDB4
 		.github\copilot-instructions.md = .github\copilot-instructions.md
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DesktopAudioTranscriptionApp.Tests", "DesktopAudioTranscriptionApp.Tests\DesktopAudioTranscriptionApp.Tests.csproj", "{A393D911-EE16-414C-A4F1-07B1BDB7D63A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -25,6 +27,10 @@ Global
 		{342A3DBB-4F36-4C15-A091-2F1E877827AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{342A3DBB-4F36-4C15-A091-2F1E877827AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{342A3DBB-4F36-4C15-A091-2F1E877827AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A393D911-EE16-414C-A4F1-07B1BDB7D63A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A393D911-EE16-414C-A4F1-07B1BDB7D63A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A393D911-EE16-414C-A4F1-07B1BDB7D63A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A393D911-EE16-414C-A4F1-07B1BDB7D63A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
