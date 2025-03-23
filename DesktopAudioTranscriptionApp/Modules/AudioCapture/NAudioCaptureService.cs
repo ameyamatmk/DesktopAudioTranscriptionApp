@@ -1,3 +1,4 @@
+using DesktopAudioTranscriptionApp.Exceptions.Utilities;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using System;
@@ -61,16 +62,23 @@ namespace DesktopAudioTranscriptionApp.Modules.AudioCapture
         {
             if (SelectedDevice == null)
             {
-                throw new InvalidOperationException("SelectedDevice is not set.");
+                throw ExceptionConverter.ConvertNAudioException(new InvalidOperationException("SelectedDevice is not set."));
             }
 
-            var enumerator = new MMDeviceEnumerator();
-            var device = enumerator.GetDevice(SelectedDevice.Id);
+            try
+            {
+                var enumerator = new MMDeviceEnumerator();
+                var device = enumerator.GetDevice(SelectedDevice.Id);
 
-            _captureInstance = new WasapiLoopbackCapture(device);
-            _captureInstance.DataAvailable += OnDataAvailable;
-            _captureInstance.RecordingStopped += OnRecordingStopped;
-            _captureInstance.StartRecording();
+                _captureInstance = new WasapiLoopbackCapture(device);
+                _captureInstance.DataAvailable += OnDataAvailable;
+                _captureInstance.RecordingStopped += OnRecordingStopped;
+                _captureInstance.StartRecording();
+            }
+            catch (Exception ex)
+            {
+                throw ExceptionConverter.ConvertNAudioException(ex, SelectedDevice.Id);
+            }
         }
 
         /// <summary>
@@ -78,7 +86,14 @@ namespace DesktopAudioTranscriptionApp.Modules.AudioCapture
         /// </summary>
         public void StopCapture()
         {
-            _captureInstance?.StopRecording();
+            try
+            {
+                _captureInstance?.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                throw ExceptionConverter.ConvertNAudioException(ex, SelectedDevice.Id);
+            }
         }
 
         private void OnDataAvailable(object sender, WaveInEventArgs e)
@@ -117,7 +132,14 @@ namespace DesktopAudioTranscriptionApp.Modules.AudioCapture
             {
                 if (disposing)
                 {
-                    _captureInstance?.Dispose();
+                    try
+                    {
+                        _captureInstance?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        throw ExceptionConverter.ConvertNAudioException(ex, SelectedDevice?.Id);
+                    }
                 }
                 _disposed = true;
             }

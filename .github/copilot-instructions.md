@@ -743,6 +743,7 @@ private void ConfigureServices(IServiceCollection services)
 - ファイルの最後には空行を入れる
 
 ### コメント
+- publicなシンボルにはXMLドキュメントコメントを付ける
 - コードに非自明なロジックがある場合はコメントを付ける
 - メソッドには要約コメントを付ける（/// XMLドキュメントコメント）
 - パブリックAPIには完全なXMLドキュメントコメントを付ける
@@ -828,6 +829,274 @@ public async Task<Result<TranscriptionSession>> LoadSessionAsync(string id)
 - 認証エラー（APIキー無効）: ユーザーに設定画面を表示
 - ネットワークエラー: 再試行オプションを提供
 - デバイスアクセスエラー: デバイス選択画面を表示
+
+# 音声文字起こしツール プロジェクトナレッジ：例外設計と処理戦略
+
+### 1. 例外処理の基本方針
+
+当プロジェクトでは、階層的な例外処理アーキテクチャを採用しています。これにより、各レイヤーが適切な責任を持ち、エラーを処理または上位レイヤーに伝播させます。
+
+- **低レベルレイヤー（Modules、Services）**: .NET標準例外をドメイン固有例外に変換
+- **ビジネスロジックレイヤー（Models、Manager）**: 業務ルール違反の検出と部分的なエラー回復
+- **プレゼンテーションレイヤー（ViewModels）**: ユーザー通知と最終的なエラーハンドリング
+- **アプリケーションレベル（App.xaml.cs）**: 未処理例外の捕捉と記録
+
+### 2. ドメイン固有の例外階層
+
+すべての例外は共通の基底クラス `AppException` を継承し、機能領域ごとに特化した例外クラスを定義します。
+
+```
+AppException (基底例外)
+├── AudioCaptureException (音声キャプチャ関連)
+│   ├── DeviceNotFoundException
+│   ├── DeviceAccessDeniedException
+│   ├── DeviceInUseException
+│   └── UnsupportedAudioFormatException
+├── SpeechRecognitionException (音声認識関連)
+│   ├── SpeechRecognitionAuthException
+│   ├── SpeechRecognitionNetworkException
+│   ├── SpeechRecognitionQuotaException
+│   ├── SpeechRecognitionProcessingException
+│   └── SpeechRecognitionServiceUnavailableException
+├── DataStorageException (データ保存関連)
+│   ├── FileAccessException
+│   ├── DiskSpaceException
+│   ├── FileNotFoundException
+│   └── FileFormatException
+├── SettingsException (設定関連)
+│   ├── SettingsLoadException
+│   ├── SettingsSaveException
+│   └── InvalidSettingException
+├── SecurityException (セキュリティ関連)
+│   ├── EncryptionException
+│   └── DecryptionException
+└── UpdateException (更新関連)
+    ├── UpdateCheckException
+    └── UpdateDownloadException
+```
+
+### 3. 例外変換ユーティリティ
+
+低レベルAPIから発生する標準例外をドメイン固有例外に変換するユーティリティクラス `ExceptionConverter` を提供します。
+
+例:
+```csharp
+// NAudio例外の変換
+catch (Exception ex)
+{
+    throw ExceptionConverter.ConvertNAudioException(ex, deviceId);
+}
+
+// Azure例外の変換
+catch (Exception ex)
+{
+    throw ExceptionConverter.ConvertAzureSpeechException(ex);
+}
+```
+
+### 4. レイヤー別処理戦略
+
+#### 4.1 低レベルレイヤー（Modules、Services）
+
+**原則**: 技術的な詳細を隠蔽し、意味のあるドメイン例外に変換する
+
+```csharp
+public async Task InitializeAsync()
+{
+    try 
+    {
+        // 外部サービスやライブラリの初期化
+    }
+    catch (Exception ex)
+    {
+        // 具体的な例外に変換
+        throw ExceptionConverter.ConvertAzureSpeechException(ex);
+    }
+}
+```
+
+#### 4.2 ビジネスロジックレイヤー（Models、Manager）
+
+**原則**: ドメイン内で回復可能なエラーを処理し、不可能な場合は例外を伝播
+
+```csharp
+public void AddTranscriptionItem(string text)
+{
+    try
+    {
+        if (_currentSession == null)
+        {
+            // 回復処理：新しいセッションを自動開始
+            StartNewSession();
+        }
+        
+        // 処理を続行...
+    }
+    catch (DataStorageException ex)
+    {
+        _logService.LogError("トランスクリプション保存エラー", ex);
+        throw; // 処理できないエラーは上位に伝播
+    }
+}
+```
+
+#### 4.3 プレゼンテーションレイヤー（ViewModels）
+
+**原則**: 例外を捕捉してユーザーフレンドリーな通知を提供し、適切な回復アクションを提案
+
+```csharp
+private async Task StartRecordingAsync()
+{
+    try
+    {
+        // 録音開始処理
+    }
+    catch (DeviceNotFoundException ex)
+    {
+        // デバイス固有のエラー処理
+        StatusMessage = "音声デバイスが見つかりません";
+        await _dialogService.ShowErrorAsync(
+            "デバイスエラー",
+            "音声デバイスが見つかりませんでした。設定で別のデバイスを選択してください。",
+            "設定を開く", "キャンセル");
+    }
+    catch (SpeechRecognitionAuthException ex)
+    {
+        // 認証エラー処理
+        StatusMessage = "Azure認証エラー";
+        bool openSettings = await _dialogService.ShowErrorAsync(
+            "認証エラー",
+            "Azure Speech Serviceの認証に失敗しました。APIキーとリージョン設定を確認してください。",
+            "設定を開く", "キャンセル");
+            
+        if (openSettings)
+        {
+            OpenSettingsCommand.Execute(null);
+        }
+    }
+    catch (AppException ex)
+    {
+        // その他のアプリケーション例外
+        StatusMessage = $"エラー: {ex.Message}";
+        _logService.LogError(ex);
+        await _dialogService.ShowErrorAsync("エラー", ex.Message, "OK", null);
+    }
+    catch (Exception ex)
+    {
+        // 予期せぬ例外
+        StatusMessage = "予期せぬエラーが発生しました";
+        _logService.LogError("予期せぬエラー", ex);
+        await _dialogService.ShowErrorAsync(
+            "エラー",
+            "予期せぬエラーが発生しました。アプリケーションを再起動してください。",
+            "詳細", "閉じる");
+    }
+}
+```
+
+#### 4.4 アプリケーションレベル（App.xaml.cs）
+
+**原則**: 未処理の例外を最終的に捕捉してログに記録し、クラッシュを防止
+
+```csharp
+private void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+{
+    // 例外をログに記録
+    var logService = ServiceProvider.GetService<ILogService>();
+    logService?.LogError("未処理の例外", e.Exception);
+    
+    // ユーザーに通知
+    MessageBox.Show(
+        "予期せぬエラーが発生しました。アプリケーションを再起動してください。",
+        "エラー",
+        MessageBoxButton.OK,
+        MessageBoxImage.Error);
+    
+    // 例外を処理済みとマーク
+    e.Handled = true;
+}
+```
+
+### 5. ユーザー通知戦略
+
+エラーの種類に応じて、適切な通知方法を選択します：
+
+1. **軽微なエラー**: ステータスバーメッセージのみ
+2. **操作エラー**: ダイアログボックスによる通知と解決策の提案
+3. **致命的エラー**: エラーダイアログとアプリケーション再起動の提案
+
+```csharp
+// 軽微なエラー
+StatusMessage = "ファイルの保存に失敗しました。自動保存は無効化されています。";
+
+// 操作エラー
+await _dialogService.ShowErrorAsync(
+    "デバイスエラー",
+    "音声デバイスが使用中です。他のアプリケーションを閉じるか、設定で別のデバイスを選択してください。",
+    "設定を開く", "閉じる");
+
+// 致命的エラー
+await _dialogService.ShowErrorAsync(
+    "致命的エラー",
+    "メモリ不足のため操作を続行できません。アプリケーションを再起動してください。",
+    "今すぐ再起動", "閉じる");
+```
+
+### 6. エラーログ戦略
+
+- **詳細ログ**: 全ての例外を内部例外も含めて詳細に記録
+- **ユーザーレポート**: 深刻なエラーについては匿名のエラーレポート送信オプション提供
+- **デバッグ情報**: デバッグモード時には詳細なエラー情報を表示
+
+```csharp
+_logService.LogError($"音声認識エラー: {ex.Message}", ex);
+```
+
+### 7. 単体テスト戦略
+
+例外の適切な変換と処理をテストするための単体テストを実装します：
+
+```csharp
+[TestMethod]
+public async Task InitializeAsync_WhenAuthenticationFails_ThrowsSpeechRecognitionAuthException()
+{
+    // Arrange
+    var mockClient = new Mock<IAzureSpeechClient>();
+    mockClient.Setup(c => c.InitializeAsync())
+        .ThrowsAsync(new AuthenticationException("Invalid credentials"));
+    
+    var service = new AzureSpeechRecognitionService(mockClient.Object, mockSettings.Object);
+    
+    // Act & Assert
+    var exception = await Assert.ThrowsExceptionAsync<SpeechRecognitionAuthException>(
+        () => service.InitializeAsync());
+}
+```
+
+### 8. プロジェクト構成
+
+例外クラスは以下のようなシンプルな構成で整理します：
+
+```
+DesktopAudioTranscriptionApp
+└── Exceptions
+    ├── AppExceptions.cs        // 基底例外
+    ├── AudioCaptureExceptions.cs
+    ├── SpeechRecognitionExceptions.cs
+    ├── DataStorageExceptions.cs
+    ├── SettingsExceptions.cs
+    ├── SecurityExceptions.cs
+    ├── UpdateExceptions.cs
+    └── ExceptionConverter.cs
+```
+
+名前空間により論理的な構造を維持します：
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Exceptions.Core { ... }
+namespace DesktopAudioTranscriptionApp.Exceptions.AudioCapture { ... }
+```
+
 
 ## 5. 非同期プログラミング
 
