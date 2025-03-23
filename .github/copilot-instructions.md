@@ -31,6 +31,688 @@ DesktopAudioTranscriptionApp
 
 GitHub Copilot カスタムインストラクションにコミットメッセージの規則を追加します。コミットメッセージの冒頭に接頭辞（プレフィックス）を付けるのは、変更の種類を簡潔に示すための一般的な慣行です。以下にその部分を追加しました：
 
+## クラス設計
+
+### 1. アプリケーション全体構造
+
+```
+DesktopAudioTranscriptionApp
+├── Modules
+│   ├── AudioCapture     # 音声キャプチャ関連
+│   ├── SpeechRecognition # 音声認識関連
+│   ├── Data             # データ管理関連
+│   └── UI               # UI関連
+├── Models               # ビジネスロジックとデータモデル
+├── ViewModels           # MVVM用のViewModelクラス
+├── Views                # UIビュー
+└── Services             # 共通サービス
+```
+
+### 2. AudioCapture モジュール
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Modules.AudioCapture
+{
+    // 音声キャプチャのための抽象インターフェース
+    public interface IAudioCaptureService
+    {
+        event EventHandler<AudioDataAvailableEventArgs> DataAvailable;
+        event EventHandler<AudioCaptureStoppedEventArgs> CaptureStopped;
+        
+        void StartCapture();
+        void StopCapture();
+        WaveFormat CurrentFormat { get; }
+        List<AudioDevice> GetAvailableDevices();
+        AudioDevice SelectedDevice { get; set; }
+    }
+
+    // 実装クラス - NAudioを利用
+    public class NAudioCaptureService : IAudioCaptureService, IDisposable
+    {
+        private WasapiLoopbackCapture _captureInstance;
+        // 実装メソッド
+    }
+
+    // イベント引数クラス
+    public class AudioDataAvailableEventArgs : EventArgs
+    {
+        public byte[] Buffer { get; set; }
+        public int BytesRecorded { get; set; }
+    }
+
+    public class AudioCaptureStoppedEventArgs : EventArgs
+    {
+        public Exception Exception { get; set; }
+    }
+
+    public class AudioDevice
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public bool IsDefault { get; set; }
+    }
+}
+```
+
+### 3. SpeechRecognition モジュール
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Modules.SpeechRecognition
+{
+    // 音声認識のための抽象インターフェース
+    public interface ISpeechRecognitionService
+    {
+        event EventHandler<IntermediateResultEventArgs> IntermediateResultReceived;
+        event EventHandler<FinalResultEventArgs> FinalResultReceived;
+        event EventHandler<RecognitionErrorEventArgs> ErrorOccurred;
+        
+        Task InitializeAsync();
+        Task StartRecognitionAsync();
+        Task StopRecognitionAsync();
+        Task ProcessAudioDataAsync(byte[] buffer, int bytesRecorded);
+    }
+
+    // Azure Speech Service実装
+    public class AzureSpeechRecognitionService : ISpeechRecognitionService, IDisposable
+    {
+        private SpeechRecognizer _speechRecognizer;
+        private PushAudioInputStream _audioInputStream;
+        private SpeechConfig _speechConfig;
+        private AudioConfig _audioConfig;
+        private readonly AzureSpeechSettings _settings;
+        
+        public AzureSpeechRecognitionService(AzureSpeechSettings settings)
+        {
+            _settings = settings;
+        }
+        
+        // 実装メソッド
+    }
+
+    // イベント引数
+    public class IntermediateResultEventArgs : EventArgs
+    {
+        public string Text { get; set; }
+    }
+
+    public class FinalResultEventArgs : EventArgs
+    {
+        public string Text { get; set; }
+        public DateTime Timestamp { get; set; }
+        public double Confidence { get; set; }
+    }
+
+    public class RecognitionErrorEventArgs : EventArgs
+    {
+        public string ErrorCode { get; set; }
+        public string ErrorDetails { get; set; }
+    }
+}
+```
+
+### 4. Data モジュール
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Modules.Data
+{
+    // データ保存のためのインターフェース
+    public interface IDataStorageService
+    {
+        Task SaveTranscriptionAsync(TranscriptionSession session);
+        Task SaveAudioAsync(byte[] audioData, TranscriptionSession session);
+        Task<List<TranscriptionSession>> GetSessionsAsync();
+        Task<TranscriptionSession> GetSessionAsync(string sessionId);
+        Task DeleteSessionAsync(string sessionId);
+    }
+
+    // ファイルベースの実装
+    public class FileStorageService : IDataStorageService
+    {
+        private readonly AppSettings _settings;
+        
+        public FileStorageService(ISettingsService settingsService)
+        {
+            _settings = settingsService.LoadSettings();
+        }
+        
+        // 実装メソッド
+    }
+
+    // トランスクリプション機能のためのマネージャー
+    public class TranscriptionManager
+    {
+        private readonly IDataStorageService _storageService;
+        private TranscriptionSession _currentSession;
+        
+        public event EventHandler<TranscriptionItemAddedEventArgs> ItemAdded;
+        
+        // メソッド
+        public void StartNewSession();
+        public void EndCurrentSession();
+        public void AddTranscriptionItem(string text);
+        public Task ExportSessionTextAsync(string sessionId, string filePath, ExportOptions options);
+    }
+
+    public class ExportOptions
+    {
+        public bool IncludeTimestamp { get; set; } = true;
+        public TimestampFormat TimestampFormat { get; set; } = TimestampFormat.ActualTime;
+        public bool IncludeSessionInfo { get; set; } = true;
+    }
+
+    // イベント引数
+    public class TranscriptionItemAddedEventArgs : EventArgs
+    {
+        public TranscriptionItem Item { get; set; }
+    }
+}
+```
+
+### 5. Models
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Models
+{
+    // トランスクリプションセッション
+    public class TranscriptionSession
+    {
+        public string Id { get; set; }
+        public DateTime StartTime { get; set; }
+        public DateTime? EndTime { get; set; }
+        public List<TranscriptionItem> Items { get; set; } = new List<TranscriptionItem>();
+        public string AudioFilePath { get; set; }
+        public string TextFilePath { get; set; }
+    }
+
+    // 個々のトランスクリプションアイテム
+    public class TranscriptionItem
+    {
+        public string Id { get; set; }
+        public string Text { get; set; }
+        public DateTime Timestamp { get; set; }
+        public TimeSpan RelativeTime { get; set; } // セッション開始からの時間
+    }
+
+    // 音声認識サービス設定の基底クラス
+    public abstract class RecognitionServiceSettings
+    {
+        public string ServiceType { get; }
+
+        protected RecognitionServiceSettings(string serviceType)
+        {
+            ServiceType = serviceType;
+        }
+    }
+
+    // Azure Speech Service設定
+    public class AzureSpeechSettings : RecognitionServiceSettings
+    {
+        public string Key { get; set; }
+        public string Region { get; set; }
+        public string Language { get; set; } = "ja-JP";
+        
+        public AzureSpeechSettings() : base("Azure") { }
+    }
+
+    // アプリケーション設定
+    public class AppSettings
+    {
+        // 基本設定
+        public RecognitionServiceSettings RecognitionSettings { get; set; }
+        public bool AlwaysOnTop { get; set; }
+        public int FontSize { get; set; }
+        public TimestampFormat TimestampFormat { get; set; }
+        
+        // 音声設定
+        public string AudioDeviceId { get; set; }
+        public bool AutoDetectDevices { get; set; }
+        public int SampleRate { get; set; }
+        public int Channels { get; set; }
+        public int BufferSize { get; set; }
+        
+        // 保存設定
+        public bool AutoSaveTranscription { get; set; }
+        public string TranscriptionSavePath { get; set; }
+        public string TranscriptionFileNameFormat { get; set; }
+        public bool SaveAudio { get; set; }
+        public AudioFileFormat AudioFileFormat { get; set; }
+    }
+
+    // 列挙型
+    public enum TimestampFormat
+    {
+        ActualTime,
+        RelativeTime,
+        Both
+    }
+
+    public enum AudioFileFormat
+    {
+        WAV,
+        MP3
+    }
+}
+```
+
+### 6. ViewModels
+
+```csharp
+namespace DesktopAudioTranscriptionApp.ViewModels
+{
+    // メイン画面のViewModel
+    public partial class MainViewModel : ObservableObject
+    {
+        private readonly IAudioCaptureService _audioCaptureService;
+        private readonly ISpeechRecognitionService _speechRecognitionService;
+        private readonly TranscriptionManager _transcriptionManager;
+        private readonly ISettingsService _settingsService;
+        
+        // プロパティ
+        [ObservableProperty]
+        private ObservableCollection<TranscriptionItemViewModel> _transcriptionItems = new();
+        
+        [ObservableProperty]
+        private string _intermediateResult;
+        
+        [ObservableProperty]
+        private bool _isRecording;
+        
+        [ObservableProperty]
+        private bool _alwaysOnTop;
+        
+        [ObservableProperty]
+        private bool _showDiagnostics;
+        
+        [ObservableProperty]
+        private string _statusMessage;
+        
+        [ObservableProperty]
+        private string _diagnosticsInfo;
+        
+        // コマンド
+        [RelayCommand]
+        private async Task StartStopRecording()
+        {
+            if (IsRecording)
+            {
+                await StopRecordingAsync();
+            }
+            else
+            {
+                await StartRecordingAsync();
+            }
+        }
+        
+        [RelayCommand]
+        private void CopyToClipboard()
+        {
+            // 実装
+        }
+        
+        [RelayCommand]
+        private void Clear()
+        {
+            // 実装
+        }
+        
+        [RelayCommand]
+        private void OpenSettings()
+        {
+            // 実装
+        }
+        
+        // メソッド
+        private async Task StartRecordingAsync()
+        {
+            // 実装
+        }
+        
+        private async Task StopRecordingAsync()
+        {
+            // 実装
+        }
+    }
+
+    // 設定画面のViewModel
+    public partial class SettingsViewModel : ObservableObject
+    {
+        private readonly ISettingsService _settingsService;
+        private AppSettings _settings;
+        
+        // プロパティ (自動生成)
+        [ObservableProperty]
+        private string _azureSpeechKey;
+        
+        [ObservableProperty]
+        private string _azureSpeechRegion;
+        
+        [ObservableProperty]
+        private bool _alwaysOnTop;
+        
+        [ObservableProperty]
+        private string _selectedFontSize;
+        
+        // 他の設定プロパティ...
+        
+        // コマンド
+        [RelayCommand]
+        private async Task Save()
+        {
+            // 設定を保存
+        }
+        
+        [RelayCommand]
+        private void Cancel()
+        {
+            // キャンセル処理
+        }
+        
+        [RelayCommand]
+        private void BrowseFolder()
+        {
+            // フォルダ選択ダイアログを表示
+        }
+    }
+
+    // トランスクリプションアイテムのViewModel
+    public class TranscriptionItemViewModel : ObservableObject
+    {
+        private readonly TranscriptionItem _model;
+        private readonly TimestampFormat _format;
+        
+        // プロパティ
+        public string Id => _model.Id;
+        public string Text => _model.Text;
+        
+        public string FormattedTimestamp
+        {
+            get
+            {
+                return _format switch
+                {
+                    TimestampFormat.ActualTime => $"[{_model.Timestamp:HH:mm:ss}]",
+                    TimestampFormat.RelativeTime => $"[{_model.RelativeTime:hh\\:mm\\:ss}]",
+                    TimestampFormat.Both => $"[{_model.Timestamp:HH:mm:ss}/{_model.RelativeTime:hh\\:mm\\:ss}]",
+                    _ => $"[{_model.Timestamp:HH:mm:ss}]"
+                };
+            }
+        }
+    }
+}
+```
+
+### 7. Services
+
+```csharp
+namespace DesktopAudioTranscriptionApp.Services
+{
+    // 設定管理サービス
+    public interface ISettingsService
+    {
+        AppSettings LoadSettings();
+        Task SaveSettingsAsync(AppSettings settings);
+    }
+
+    // JSON設定ファイル実装
+    public class JsonSettingsService : ISettingsService
+    {
+        private readonly string _settingsFilePath;
+        private readonly SecureStorageService _secureStorage;
+        
+        public JsonSettingsService(SecureStorageService secureStorage)
+        {
+            _secureStorage = secureStorage;
+            _settingsFilePath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "DesktopAudioTranscriptionApp",
+                "settings.json");
+        }
+        
+        // 実装メソッド
+    }
+
+    // APIキー安全管理サービス
+    public class SecureStorageService
+    {
+        public void StoreSecureData(string key, string value)
+        {
+            // Windows DPAPIを使用して安全に保存
+        }
+        
+        public string RetrieveSecureData(string key)
+        {
+            // Windows DPAPIを使用して取得
+        }
+    }
+
+    // ロギングサービス
+    public interface ILogService
+    {
+        void LogInfo(string message);
+        void LogWarning(string message);
+        void LogError(string message, Exception ex = null);
+    }
+
+    // ファイルベースのログ実装
+    public class FileLogService : ILogService
+    {
+        private readonly string _logFilePath;
+        
+        public FileLogService()
+        {
+            string logDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "DesktopAudioTranscriptionApp",
+                "Logs");
+                
+            Directory.CreateDirectory(logDirectory);
+            _logFilePath = Path.Combine(logDirectory, $"log_{DateTime.Now:yyyyMMdd}.txt");
+        }
+        
+        // 実装メソッド
+    }
+
+    // アプリケーション更新確認サービス
+    public class UpdateCheckService
+    {
+        public async Task<UpdateInfo> CheckForUpdatesAsync()
+        {
+            // 実装
+        }
+    }
+
+    public class UpdateInfo
+    {
+        public bool UpdateAvailable { get; set; }
+        public string CurrentVersion { get; set; }
+        public string NewVersion { get; set; }
+        public string ReleaseNotes { get; set; }
+        public string DownloadUrl { get; set; }
+    }
+}
+```
+
+## データ設計
+
+### 1. 設定ファイル（JSON形式）
+
+```json
+{
+  "RecognitionSettings": {
+    "$type": "DesktopAudioTranscriptionApp.Models.AzureSpeechSettings, DesktopAudioTranscriptionApp",
+    "Key": "encrypted_key_placeholder",
+    "Region": "japaneast",
+    "Language": "ja-JP"
+  },
+  "UI": {
+    "AlwaysOnTop": false,
+    "FontSize": 14,
+    "TimestampFormat": "ActualTime"
+  },
+  "AudioCapture": {
+    "DeviceId": "default",
+    "AutoDetectDevices": true,
+    "SampleRate": 16000,
+    "Channels": 1,
+    "BufferSize": 2048
+  },
+  "Storage": {
+    "AutoSaveTranscription": true,
+    "TranscriptionSavePath": "C:\\Users\\Username\\Documents\\Transcriptions",
+    "TranscriptionFileNameFormat": "transcript_{yyyy-MM-dd_HH-mm-ss}",
+    "SaveAudio": false,
+    "AudioFileFormat": "WAV"
+  },
+  "Updates": {
+    "AutoCheck": true,
+    "LastCheckDate": "2025-03-23T00:00:00Z"
+  }
+}
+```
+
+### 2. トランスクリプションセッションデータ（JSON）
+
+```json
+{
+  "SessionId": "20250323_145502",
+  "StartTime": "2025-03-23T14:55:02.123Z",
+  "EndTime": "2025-03-23T15:10:45.678Z",
+  "Items": [
+    {
+      "Id": "item1",
+      "Text": "これは音声認識のテストです。",
+      "Timestamp": "2025-03-23T14:55:20.456Z",
+      "RelativeTime": "00:00:18.333"
+    },
+    {
+      "Id": "item2",
+      "Text": "Windowsアプリケーションの音声をリアルタイムで文字に起こします。",
+      "Timestamp": "2025-03-23T14:55:32.789Z",
+      "RelativeTime": "00:00:30.666"
+    }
+  ],
+  "AudioFilePath": "audio_20250323_145502.wav",
+  "TextFilePath": "transcript_20250323_145502.txt"
+}
+```
+
+### 3. テキストエクスポート形式
+
+#### 基本テキスト形式（タイムスタンプあり）
+
+```
+# 音声文字起こし - 2025/03/23 14:55:02
+
+[14:55:20] これは音声認識のテストです。
+[14:55:32] Windowsアプリケーションの音声をリアルタイムで文字に起こします。
+[14:56:05] NAudioを使用してデスクトップ音声をキャプチャしています。
+[14:56:40] Azure Speech Serviceによる音声認識の精度は非常に高いです。
+```
+
+#### 基本テキスト形式（タイムスタンプなし）
+
+```
+これは音声認識のテストです。
+Windowsアプリケーションの音声をリアルタイムで文字に起こします。
+NAudioを使用してデスクトップ音声をキャプチャしています。
+Azure Speech Serviceによる音声認識の精度は非常に高いです。
+```
+
+#### マークダウン形式
+
+```markdown
+# 音声文字起こし結果
+
+## セッション情報
+- 開始時間: 2025/03/23 14:55:02
+- 終了時間: 2025/03/23 15:10:45
+- 継続時間: 15分43秒
+
+## 認識テキスト
+
+### [14:55:20]
+これは音声認識のテストです。
+
+### [14:55:32]
+Windowsアプリケーションの音声をリアルタイムで文字に起こします。
+
+### [14:56:05]
+NAudioを使用してデスクトップ音声をキャプチャしています。
+
+### [14:56:40]
+Azure Speech Serviceによる音声認識の精度は非常に高いです。
+```
+
+### 4. 依存性注入の設定
+
+```csharp
+// App.xaml.csでの実装
+protected override void OnStartup(StartupEventArgs e)
+{
+    base.OnStartup(e);
+    
+    var services = new ServiceCollection();
+    
+    // サービスの登録
+    ConfigureServices(services);
+    
+    ServiceProvider = services.BuildServiceProvider();
+    
+    // メインウィンドウの表示
+    var mainWindow = ServiceProvider.GetRequiredService<MainWindow>();
+    mainWindow.Show();
+}
+
+private void ConfigureServices(IServiceCollection services)
+{
+    // シングルトンサービス
+    services.AddSingleton<ILogService, FileLogService>();
+    services.AddSingleton<SecureStorageService>();
+    services.AddSingleton<ISettingsService, JsonSettingsService>();
+    services.AddSingleton<TranscriptionManager>();
+    services.AddSingleton<UpdateCheckService>();
+    
+    // トランジェントサービス
+    services.AddTransient<IAudioCaptureService, NAudioCaptureService>();
+    services.AddTransient<ISpeechRecognitionService, AzureSpeechRecognitionService>();
+    services.AddTransient<IDataStorageService, FileStorageService>();
+    
+    // ViewModels
+    services.AddTransient<MainViewModel>();
+    services.AddTransient<SettingsViewModel>();
+    
+    // Views
+    services.AddTransient<MainWindow>();
+    services.AddTransient<SettingsWindow>();
+}
+```
+
+## 設計のポイント
+
+1. **MVVMアーキテクチャ**：
+   - CommunityToolkit.Mvvmを使用したMVVMパターンの実装
+   - ObservablePropertyやRelayCommandによる簡潔なコード
+
+2. **拡張性**：
+   - 音声キャプチャと音声認識サービスの抽象化
+   - RecognitionServiceSettingsの継承による型安全な設定
+
+3. **エラーハンドリング**：
+   - 各サービスでの適切なエラー通知メカニズム
+   - ロギングサービスによるエラー記録
+
+4. **データ管理**：
+   - JSONベースのシンプルなファイル保存
+   - セキュアストレージによるAPIキーの保護
+
+5. **UI**：
+   - シンプルで使いやすいインターフェース
+   - 最前面表示やフォントサイズなどのカスタマイズ
+
+6. **設定**：
+   - アプリケーション全体の設定を一元管理
+   - JSONファイルでの簡単な保存と読み込み
+
 ## 1. 命名規則
 
 ### クラス・インターフェース
