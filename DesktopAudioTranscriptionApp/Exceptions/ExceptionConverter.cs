@@ -25,15 +25,13 @@ public static class ExceptionConverter
                 case NAudio.MmResult.BadDeviceId:
                     return new DeviceNotFoundException(deviceId ?? "unknown", ex);
 
-                case NAudio.MmResult.AllocatedAlready:
-                case NAudio.MmResult.DeviceAllocated:
+                case NAudio.MmResult.AlreadyAllocated:
                     return new DeviceInUseException(ex);
 
                 case NAudio.MmResult.NoDriver:
-                case NAudio.MmResult.NoAccess:
                     return new DeviceAccessDeniedException(ex);
 
-                case NAudio.MmResult.BadFormat:
+                case NAudio.MmResult.WaveBadFormat:
                     return new UnsupportedAudioFormatException(null, ex);
 
                 default:
@@ -67,7 +65,7 @@ public static class ExceptionConverter
     public static SpeechRecognitionException ConvertAzureSpeechException(Exception ex)
     {
         // Azure認証エラー
-        if (ex is Microsoft.CognitiveServices.Speech.AuthenticationException)
+        if (ex.Message.Contains("authentication"))
         {
             return new SpeechRecognitionAuthException(ex);
         }
@@ -120,7 +118,7 @@ public static class ExceptionConverter
             if (ioException.Message.Contains("disk") &&
                 (ioException.Message.Contains("full") || ioException.Message.Contains("space")))
             {
-                string drivePath = Path.GetPathRoot(filePath);
+                string drivePath = System.IO.Path.GetPathRoot(filePath);
                 return new DiskSpaceException(drivePath, ex);
             }
 
@@ -150,6 +148,4 @@ public static class ExceptionConverter
         // デフォルト
         return new DataStorageException($"ファイル操作エラー: {ex.Message}", ex);
     }
-
-
 }
